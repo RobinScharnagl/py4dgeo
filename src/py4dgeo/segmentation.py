@@ -1180,7 +1180,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         return seeds
         
 
-    def detect_linear_rdp(self, seed_candidates_curr,  max_change_period=200, data_gap=None):
+    def detect_linear_rdp(self, seed_candidates_curr,  max_change_period=None, data_gap=None):
         seeds = []
         lod = self.analysis.uncertainties['lodetection']
         epsilon = np.nanmean(lod)
@@ -1191,7 +1191,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         for cp_idx in seed_candidates_curr:
             timeseries = self.analysis.distances_for_compute[cp_idx, :]
             timestamps = [
-                t + self.analysis.reference_epoch.timestamp
+                t + self.analysis.reference_epoch.timestamp 
                 for t in self.analysis.timedeltas
             ]
             time_day = np.array(
@@ -1381,13 +1381,13 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
         elif method == 'linear_dtr':
             seeds = self.detect_linear_dtr(seed_candidates_curr,
-                                           max_change_period= kwargs.get('max_change_period'),
-                                           data_gap = kwargs.get('data_gap'))
+                                           max_change_period= self.max_change_period,
+                                           data_gap = self.data_gap)
 
         elif method == 'linear_rdp':
             seeds = self.detect_linear_rdp(seed_candidates_curr,
-                                           max_change_period= kwargs.get('max_change_period'),
-                                           data_gap = kwargs.get('data_gap'))
+                                           max_change_period= self.max_change_period,
+                                            data_gap = self.data_gap)
 
         else:
             raise ValueError('Something went wrong')
