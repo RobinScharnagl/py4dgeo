@@ -707,7 +707,6 @@ class SpatiotemporalAnalysis:
         return merged_4dobcs
 
 
-
 class RegionGrowingAlgorithmBase:
     def __init__(
         self,
@@ -951,8 +950,8 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         resume_from_seed=0,
         stop_at_seed=np.inf,
         write_nr_seeds=False,
-        method=None, 
-        max_change_period=200, 
+        method=None,
+        max_change_period=200,
         data_gap=None,
         **kwargs,
     ):
@@ -1041,13 +1040,12 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         self.method = method
         self.max_change_period = max_change_period
         self.data_gap = data_gap
-       
-
 
     # sort the seeds according to their change amplitude in descending order
     def seed_sorting_scorefunction(self):
-        ''' Return a seed sort key: amplitude forrdp/dtr, else neighborhood similarity'''
-        if self._seed_method in ('linear_rdp', 'linear_dtr'):
+        """Return a seed sort key: amplitude forrdp/dtr, else neighborhood similarity"""
+        if self._seed_method in ("linear_rdp", "linear_dtr"):
+
             def magnitude_sort(seed):
                 magn = abs(
                     self.analysis.distances_for_compute[seed.index, seed.start_epoch]
@@ -1056,8 +1054,8 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
                 return magn * (-1)  # achieve descending order
 
             return magnitude_sort
-        
-       # Neighborhood similarity sorting function"""
+
+        # Neighborhood similarity sorting function"""
         # The 4D-OBC algorithm sorts by similarity in the neighborhood
         # of the seed.
         def neighborhood_similarity(seed):
@@ -1084,8 +1082,6 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             return sum(similarities, 0.0) / (len(neighbors) - 1)
 
         return neighborhood_similarity
-
-        
 
     def volume_cpd(self, seed_candidates_curr):
         seeds = []
@@ -1178,24 +1174,28 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             seeds.extend(corepoint_seeds)
 
         return seeds
-        
 
-    def detect_linear_rdp(self, seed_candidates_curr,  max_change_period=None, data_gap=None):
+    def detect_linear_rdp(
+        self, seed_candidates_curr, max_change_period=None, data_gap=None
+    ):
         seeds = []
-        lod = self.analysis.uncertainties['lodetection']
+        lod = self.analysis.uncertainties["lodetection"]
         epsilon = np.nanmean(lod)
 
-
-         # iterate over all time series to identify linear changes
+        # iterate over all time series to identify linear changes
         logger.info("Iterating over seedpoints (RDP)")
         for cp_idx in seed_candidates_curr:
             timeseries = self.analysis.distances_for_compute[cp_idx, :]
             timestamps = [
-                t + self.analysis.reference_epoch.timestamp 
+                t + self.analysis.reference_epoch.timestamp
                 for t in self.analysis.timedeltas
             ]
             time_day = np.array(
-                [(t - self.analysis.reference_epoch.timestamp).total_seconds()/ (3600 * 24) for t in timestamps]
+                [
+                    (t - self.analysis.reference_epoch.timestamp).total_seconds()
+                    / (3600 * 24)
+                    for t in timestamps
+                ]
             )
 
             # polygon approximation using the Ramer-Douglas-Peucker algorithm
@@ -1211,7 +1211,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
                 for i in range(len(idxs_keypoints) - 1)
             ]
 
-             # segment-wise linear regression for each polygon interval
+            # segment-wise linear regression for each polygon interval
             for idx in idxs_keypoints_both:
                 time_day_fit = time_day[idx[0] : idx[-1] + 1]
                 timeseries_fit = timeseries[idx[0] : idx[-1] + 1]
@@ -1234,18 +1234,23 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
                 startp = np.max([idx[0] - 1, 0])
                 stopp = np.min([idx[-1] + 1, len(timeseries) - 1])
 
-
-                    # consider minimal change amplitude
+                # consider minimal change amplitude
                 if abs(np.max(y_lr) - np.min(y_lr)) < self.height_threshold:
                     continue
 
                 # consider maximum change period
-                elif max_change_period is not None and stopp - startp > max_change_period:
+                elif (
+                    max_change_period is not None and stopp - startp > max_change_period
+                ):
                     continue
 
                 # cosider data gap
-                elif data_gap is not None and stopp >= data_gap and startp <= data_gap - 1:
-                        continue
+                elif (
+                    data_gap is not None
+                    and stopp >= data_gap
+                    and startp <= data_gap - 1
+                ):
+                    continue
 
                 # add current seed to list of seed candidates
                 else:
@@ -1254,8 +1259,9 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
         return seeds
 
-
-    def detect_linear_dtr(self, seed_candidates_curr, max_change_period=None, data_gap=None):
+    def detect_linear_dtr(
+        self, seed_candidates_curr, max_change_period=None, data_gap=None
+    ):
         seeds = []
 
         # iterate over all time series to identify linear changes
@@ -1267,7 +1273,11 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
                 for t in self.analysis.timedeltas
             ]
             time_day = np.array(
-                [(t - self.analysis.reference_epoch.timestamp).total_seconds()/ (3600 * 24) for t in timestamps]
+                [
+                    (t - self.analysis.reference_epoch.timestamp).total_seconds()
+                    / (3600 * 24)
+                    for t in timestamps
+                ]
             )
 
             idx_nan = np.isnan(timeseries)
@@ -1290,8 +1300,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             rgr.fit(time_day[~idx_nan].reshape(-1, 1), dys.reshape(-1, 1))
             dys_dt = rgr.predict(time_day.reshape(-1, 1)).flatten()
 
-
-             # group epochs with equal predicted gradient dys_dt into on interval
+            # group epochs with equal predicted gradient dys_dt into on interval
             ys_sl = np.ones_like(timeseries)
             for dy in np.unique(dys_dt):
 
@@ -1316,18 +1325,22 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
                 startp = np.max([idx[0] - 1, 0])
                 stopp = np.min([idx[-1] + 1, len(timeseries) - 1])
 
-
-
                 # consider minimal change amplitude
                 if abs(np.max(ys_sl[msk]) - np.min(ys_sl[msk])) < self.height_threshold:
                     continue
 
                 # consider maximum change period
-                elif max_change_period is not None and stopp - startp > max_change_period:
+                elif (
+                    max_change_period is not None and stopp - startp > max_change_period
+                ):
                     continue
 
                 # consider possible data gap
-                elif data_gap is not None and stopp >= data_gap and startp <=data_gap - 1:
+                elif (
+                    data_gap is not None
+                    and stopp >= data_gap
+                    and startp <= data_gap - 1
+                ):
                     continue
 
                 # add current seed to list of seed candidates
@@ -1336,7 +1349,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
                     seeds.append(curr_seed)
 
         return seeds
-            
+
     def find_seedpoints(self, **kwargs):
         """Calculate seedpoints for the region growing algorithm"""
         method = self.method
@@ -1349,18 +1362,17 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         # window_min_size = 12
         # window_jump = 1
         # window_penalty = 1.0
-        
-        AVAILABLE_METHODS = {'volume_cpd', 'linear_dtr', 'linear_rdp'}
+
+        AVAILABLE_METHODS = {"volume_cpd", "linear_dtr", "linear_rdp"}
 
         if method is not None and method not in AVAILABLE_METHODS:
-            raise ValueError(f'Unknown seed decetcion method:{method}')
+            raise ValueError(f"Unknown seed decetcion method:{method}")
 
         # Before starting the process, we check if the user has set a reasonable window width parameter
         if self.window_width >= self.analysis.distances_for_compute.shape[1]:
             raise Py4DGeoError(
                 "Window width cannot be larger than the length of the time series - please adapt parameter"
             )
-
 
         # The list of core point indices to check as seeds
         if self.seed_candidates is None:
@@ -1376,23 +1388,27 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             # Use the specified corepoint indices, but consider subsampling
             seed_candidates_curr = self.seed_candidates  # [::self.seed_subsampling]
 
-        if method is None or method == 'volume_cpd':
+        if method is None or method == "volume_cpd":
             seeds = self.volume_cpd(seed_candidates_curr)
 
-        elif method == 'linear_dtr':
-            seeds = self.detect_linear_dtr(seed_candidates_curr,
-                                           max_change_period= self.max_change_period,
-                                           data_gap = self.data_gap)
+        elif method == "linear_dtr":
+            seeds = self.detect_linear_dtr(
+                seed_candidates_curr,
+                max_change_period=self.max_change_period,
+                data_gap=self.data_gap,
+            )
 
-        elif method == 'linear_rdp':
-            seeds = self.detect_linear_rdp(seed_candidates_curr,
-                                           max_change_period= self.max_change_period,
-                                            data_gap = self.data_gap)
+        elif method == "linear_rdp":
+            seeds = self.detect_linear_rdp(
+                seed_candidates_curr,
+                max_change_period=self.max_change_period,
+                data_gap=self.data_gap,
+            )
 
         else:
-            raise ValueError('Something went wrong')
+            raise ValueError("Something went wrong")
 
-        return seeds    
+        return seeds
 
     def filter_objects(self, obj):
         """A filter for objects produced by the region growing algorithm"""
