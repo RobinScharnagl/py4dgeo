@@ -1051,7 +1051,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
     # sort the seeds according to their change amplitude in descending order
     def seed_sorting_scorefunction(self):
-        """Return a seed sort key: amplitude forrdp/dtr, else neighborhood similarity"""
+        """Return a seed sort key: amplitude for rdp/dtr, else neighborhood similarity"""
         if self._seed_method in ("linear_rdp", "linear_dtr"):
 
             def magnitude_sort(seed):
@@ -1092,7 +1092,15 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         return neighborhood_similarity
 
     def volume_cpd(self, seed_candidates_curr):
+
+        # Before starting the process, we check if the user has set a reasonable window width parameter
+        if self.window_width >= self.analysis.distances_for_compute.shape[1]:
+            raise Py4DGeoError(
+                "Window width cannot be larger than the length of the time series - please adapt parameter"
+            )
+
         seeds = []
+
         # Iterate over all time series to analyse their change points
         for i in seed_candidates_curr:
             # Extract the time series and interpolate its nan values
@@ -1387,17 +1395,6 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         # window_jump = 1
         # window_penalty = 1.0
 
-        AVAILABLE_METHODS = {"volume_cpd", "linear_dtr", "linear_rdp"}
-
-        if method is not None and method not in AVAILABLE_METHODS:
-            raise ValueError(f"Unknown seed decetcion method:{method}")
-
-        # Before starting the process, we check if the user has set a reasonable window width parameter
-        if self.window_width >= self.analysis.distances_for_compute.shape[1]:
-            raise Py4DGeoError(
-                "Window width cannot be larger than the length of the time series - please adapt parameter"
-            )
-
         # The list of core point indices to check as seeds
         if self.seed_candidates is None:
             if self.seed_subsampling == 0:
@@ -1415,6 +1412,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         # if method is not specified, use the default
         if method is None:
             method = "volume_cpd"
+            logger.info("Using default seed detection method: volume_cpd")
 
         if method == "volume_cpd":
             seeds = self.volume_cpd(seed_candidates_curr)
@@ -1434,7 +1432,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             )
 
         else:
-            raise ValueError("Something went wrong")
+            raise ValueError(f"Unknown seed decection method:{method}")
 
         return seeds
 
