@@ -1,5 +1,4 @@
 # %%
-from nbclient.client import timestamp
 from py4dgeo.epoch import Epoch, as_epoch
 from py4dgeo.logger import logger_context
 from py4dgeo.util import Py4DGeoError, find_file
@@ -9,20 +8,16 @@ import datetime
 import json
 import logging
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pickle
 import seaborn
 import tempfile
 import zipfile
-import matplotlib.pyplot as plt
 import copy
-import rdp
-from sklearn.linear_model import LinearRegression
 
 import _py4dgeo
-from sklearn.tree import DecisionTreeRegressor
-from functools import reduce
 
 # Get the py4dgeo logger instance
 logger = logging.getLogger("py4dgeo")
@@ -618,6 +613,9 @@ class SpatiotemporalAnalysis:
         smoothing=False,
         smoothing_window=5,
     ):
+
+        from functools import reduce
+
         distance = self.distances_for_compute
         if distance is None:
             raise ValueError
@@ -1188,6 +1186,14 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
     def detect_linear_rdp(
         self, seed_candidates_curr, max_change_period=None, data_gap=None
     ):
+        try:
+            import rdp
+            from sklearn.linear_model import LinearRegression
+        except ImportError as exc:
+            raise Py4DGeoError(
+                "The 'linear_rdp' seed detection method requires the optional seed detection dependencies."
+            ) from exc
+
         seeds = []
         lod = self.analysis.uncertainties["lodetection"]
         epsilon = np.nanmean(lod)
@@ -1272,6 +1278,14 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
     def detect_linear_dtr(
         self, seed_candidates_curr, max_change_period=None, data_gap=None
     ):
+        try:
+            from sklearn.linear_model import LinearRegression
+            from sklearn.tree import DecisionTreeRegressor
+        except ImportError as exc:
+            raise Py4DGeoError(
+                "The 'linear_dtr' seed detection method requires the optional seed detection dependencies."
+            ) from exc
+
         seeds = []
 
         # iterate over all time series to identify linear changes
@@ -1398,7 +1412,11 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             # Use the specified corepoint indices, but consider subsampling
             seed_candidates_curr = self.seed_candidates  # [::self.seed_subsampling]
 
-        if method is None or method == "volume_cpd":
+        # if method is not specified, use the default
+        if method is None:
+            method = "volume_cpd"
+
+        if method == "volume_cpd":
             seeds = self.volume_cpd(seed_candidates_curr)
 
         elif method == "linear_dtr":
