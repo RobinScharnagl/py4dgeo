@@ -818,11 +818,6 @@ class RegionGrowingAlgorithmBase:
             analysis.invalidate_results()
 
         # Return pre-calculated objects if they are available
-        precalculated = analysis.objects
-        if precalculated is not None:
-            logger.info("Reusing objects by change stored in analysis object")
-            return precalculated
-
         # Check if there are pre-calculated objects.
         # If so, create objects list from these and continue growing objects, taking into consideration objects that are already grown.
         # if not initiate new empty objects list
@@ -863,13 +858,12 @@ class RegionGrowingAlgorithmBase:
         # Iterate over the seeds to maybe turn them into objects
         for i, seed in enumerate(
             seeds
-        ):  # [self.resume_from_seed-1:]): # starting seed ranked at the `resume_from_seed` variable (representing 1 for index 0)
-            # or to keep within the same index range when resuming from seed:
+        ):
             if i < (
-                self.resume_from_seed - 1
-            ):  # resume from index 0 when `resume_from_seed` == 1
+                self.resume_from_seed
+            ):
                 continue
-            if i >= (self.stop_at_seed - 1):  # stop at index 0 when `stop_at_seed` == 1
+            if self.stop_at_seed is not None and i >= self.stop_at_seed:
                 break
 
             # save objects to analysis object when at index `intermediate_saving`
@@ -956,7 +950,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         use_unfinished=True,
         intermediate_saving=0,
         resume_from_seed=0,
-        stop_at_seed=np.inf,
+        stop_at_seed=None,
         write_nr_seeds=False,
         method=None,
         max_change_period=200,
@@ -970,7 +964,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             of _segmentation seed candidates. This can be used to speed up
             the generation of seeds. The default of 1 does not perform any
             subsampling, a value of, e.g., 10 would only consider every 10th
-            corepoint for adding seeds.
+            corepoint for adding seeds. The value must be >0.
         :type seed_subsampling: int
         :param seed_candidates:
             A set of indices specifying which core points should be used for seed detection.
@@ -982,12 +976,15 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             This is to ensure that if the algorithm is terminated unexpectedly not all results are lost. If set to 0 no intermediate saving is done.
         :type intermediate_saving: int
         :param resume_from_seed:
-            Parameter specifying from which seed index the region growing algorithm must resume. If zero all seeds are considered, starting from the highest ranked seed.
+            Parameter specifying from which seed index the region growing algorithm should start/resume.
+            For example, 0 starts with the first seed and 5 starts with the sixth seed.
+            If zero all seeds are considered, starting from the highest ranked seed.
             Default is 0.
         :type resume_from_seed: int
         :param stop_at_seed:
-            Parameter specifying at which seed to stop region growing and terminate the run function.
-            Default is np.inf, meaning all seeds are considered.
+            Parameter specifying at which seed index to stop region growing and terminate the run function (exclusive).
+            For example, stop_at_seed=10 processes seeds with indices 0..9 only.
+            Default is None, meaning all seeds are considered.
         :type stop_at_seed: int
         :param write_nr_seeds:
             If True, after seed detection, a text file is written in the working directory containing the total number of detected seeds.
@@ -1082,8 +1079,9 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
     # sort the seeds according to their change amplitude in descending order
     def seed_sorting_scorefunction(self):
         """Return a seed sort key: amplitude for rdp/dtr, else neighborhood similarity"""
-        if self._seed_method in ("linear_rdp", "linear_dtr"):
 
+
+        if self._seed_method in ("linear_rdp", "linear_dtr"):
             def magnitude_sort(seed):
                 magn = abs(
                     self.analysis.distances_for_compute[seed.index, seed.start_epoch]
@@ -1093,9 +1091,8 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
             return magnitude_sort
 
-        # Neighborhood similarity sorting function"""
-        # The 4D-OBC algorithm sorts by similarity in the neighborhood
-        # of the seed.
+        # Neighborhood similarity sorting function
+        # The 4D-OBC algorithm sorts by similarity in the neighborhood of the seed.
         def neighborhood_similarity(seed):
             self.analysis.corepoints._validate_search_tree()
             neighbors = self.analysis.corepoints._radius_search(
@@ -1121,7 +1118,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
         return neighborhood_similarity
 
-    def volume_cpd(self, seed_candidates_curr):
+    def detect_volume_cpd(self, seed_candidates_curr):
 
         # Before starting the process, we check if the user has set a reasonable window width parameter
         if self.window_width >= self.analysis.distances_for_compute.shape[1]:
@@ -1237,21 +1234,12 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         lod = self.analysis.uncertainties["lodetection"]
         epsilon = np.nanmean(lod)
 
+        time_day = np.array([td.total_seconds() for td in self.analysis.timedeltas]) / (3600 * 24)
+
         # iterate over all time series to identify linear changes
         logger.info("Iterating over seedpoints (RDP)")
         for cp_idx in seed_candidates_curr:
             timeseries = self.analysis.distances_for_compute[cp_idx, :]
-            timestamps = [
-                t + self.analysis.reference_epoch.timestamp
-                for t in self.analysis.timedeltas
-            ]
-            time_day = np.array(
-                [
-                    (t - self.analysis.reference_epoch.timestamp).total_seconds()
-                    / (3600 * 24)
-                    for t in timestamps
-                ]
-            )
 
             # polygon approximation using the Ramer-Douglas-Peucker algorithm
             poly_aprx = rdp.rdp(
@@ -1425,17 +1413,17 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
         # The list of core point indices to check as seeds
         if self.seed_candidates is None:
-            if self.seed_subsampling == 0:
+            if self.seed_subsampling <1:
                 raise Py4DGeoError(
-                    "Subsampling factor cannot be 0, use 1 or any integer larger than 1"
+                    "Subsampling factor must be a positive integer greater than or equal to 1."
                 )
             # Use all corepoints if no selection specified, considering subsampling
             seed_candidates_curr = range(
                 0, self.analysis.distances_for_compute.shape[0], self.seed_subsampling
             )
         else:
-            # Use the specified corepoint indices, but consider subsampling
-            seed_candidates_curr = self.seed_candidates  # [::self.seed_subsampling]
+            # Use the specified corepoint indices, do not consider subsampling
+            seed_candidates_curr = self.seed_candidates
 
         # if method is not specified, use the default
         if method is None:
@@ -1443,7 +1431,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             logger.info("Using default seed detection method: volume_cpd")
 
         if method == "volume_cpd":
-            seeds = self.volume_cpd(seed_candidates_curr)
+            seeds = self.detect_volume_cpd(seed_candidates_curr)
 
         elif method == "linear_dtr":
             seeds = self.detect_linear_dtr(
