@@ -973,41 +973,10 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             corepoint for adding seeds.
         :type seed_subsampling: int
         :param seed_candidates:
-            A set of indices specifying which core points should be used for seed detection. This can be used to perform _segmentation for selected locations. The default of None does not perform any selection and uses all corepoints. The subsampling parameter is applied additionally.
+            A set of indices specifying which core points should be used for seed detection.
+            This can be used to perform _segmentation for selected locations.
+            The default of None does not perform any selection and uses all corepoints.
         :type seed_candidates: list
-        :param window_width:
-            The width of the sliding temporal window for change point detection. The sliding window
-            moves along the signal and determines the discrepancy between the first and the second
-            half of the window (i.e. subsequent time series segments within the window width). The
-            default value is 24, corresponding to one day in case of hourly data.
-        :type window_width: int
-        :param window_min_size:
-            The minimum temporal distance needed between two seed candidates, for the second one to be considered.
-            The default value is 1, such that all detected seeds candidates are considered.
-        :type window_min_size: int
-        :param window_jump:
-            The interval on which the sliding temporal window moves and checks for seed candidates.
-            The default value is 1, corresponding to a check for every epoch in the time series.
-        :type window_jump: int
-        :param window_penalty:
-            A complexity penalty that determines how strict the change point detection is.
-            A higher penalty results in stricter change point detection (i.e, fewer points are detected), while a low
-            value results in a large amount of detected change points. The default value is 1.0.
-        :type window_penalty: float
-        :param minperiod:
-            The minimum period of a detected change to be considered as seed candidate for subsequent
-            _segmentation. The default is 24, corresponding to one day for hourly data.
-        :type minperiod: int
-        :param height_threshold:
-            The height threshold represents the required magnitude of a detected change to be considered
-            as seed candidate for subsequent _segmentation. The magnitude of a detected change is derived
-            as unsigned difference between magnitude (i.e. distance) at start epoch and peak magnitude.
-            The default is 0.0, in which case all detected changes are used as seed candidates.
-        :type height_threshold: float
-        :param use_unfinished:
-            If False, seed candidates that are not finished by the end of the time series are not considered in further
-            analysis. The default is True, in which case unfinished seed_candidates are regarded as seeds region growing.
-        :type use_unfinished: bool
         :param intermediate_saving:
             Parameter that determines after how many considered seeds, the resulting list of 4D-OBCs is saved to the SpatiotemporalAnalysis object.
             This is to ensure that if the algorithm is terminated unexpectedly not all results are lost. If set to 0 no intermediate saving is done.
@@ -1025,27 +994,88 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             This can be used to split up the consecutive 4D-OBC segmentation into different subsets.
             Default is False, meaning no txt file is written.
         :type write_nr_seeds: bool
+        :param method:
+            Seed detection method to use. Supported values are "volume_cpd", "linear_rdp", and "linear_dtr".
+            If None, the default method "volume_cpd" is used.
+        :type method: str | None
+
+        :param height_threshold:
+            The height threshold represents the required magnitude of a detected change to be considered
+            as seed candidate for subsequent _segmentation. The magnitude of a detected change is derived
+            as unsigned difference between magnitude (i.e. distance) at start epoch and peak magnitude.
+            The default is 0.0, in which case all detected changes are used as seed candidates.
+        :type height_threshold: float
+
+        :param window_width:
+            The width of the sliding temporal window for change point detection. The sliding window
+            moves along the signal and determines the discrepancy between the first and the second
+            half of the window (i.e. subsequent time series segments within the window width). Only used by the "volume_cpd" seed detection method.
+            The default value is 24, corresponding to one day in case of hourly data.
+        :type window_width: int
+        :param window_min_size:
+            The minimum temporal distance needed between two change points, for the second one to be considered.
+            This parameter is only used by the "volume_cpd" seed detection method. The default value is 12.
+        :type window_min_size: int
+        :param window_jump:
+            The interval on which the sliding temporal window moves and checks for seed candidates.
+            Only used by the "volume_cpd" seed detection method.
+            The default value is 1, corresponding to a check for every epoch in the time series.
+        :type window_jump: int
+        :param window_penalty:
+            A complexity penalty that determines how strict the change point detection is.
+            A higher penalty results in stricter change point detection (i.e, fewer points are detected), while a low
+            value results in a large amount of detected change points. Only used by the "volume_cpd" seed detection method.
+            The default value is 1.0.
+        :type window_penalty: float
+        :param minperiod:
+            The minimum period of a detected change to be considered as seed candidate for subsequent
+            _segmentation. Only used by the "volume_cpd" seed detection method.
+            The default is 24, corresponding to one day for hourly data.
+        :type minperiod: int
+        :param use_unfinished:
+            If False, seed candidates that are not finished by the end of the time series are not considered in further
+            analysis. Only used by the "volume_cpd" seed detection method.
+            The default is True, in which case unfinished seed_candidates are regarded as seeds region growing.
+        :type use_unfinished: bool
+
+        :param max_change_period:
+            Maximum allowed duration of a detected seed candidate in epochs.
+            Only used by the "linear_rdp" and "linear_dtr" seed detection methods.
+            Seed candidates exceeding this value are discarded.
+        :type max_change_period: int | None
+        :param data_gap:
+            Epoch index representing a known temporal data gap. Seed candidates spanning this gap are discarded.
+            Only used by the "linear_rdp" and "linear_dtr" seed detection methods.
+        :type data_gap: int | None
+
         """
 
         # Initialize base class
         super().__init__(**kwargs)
 
         # Store the given parameters
+        # General seed detection parameters
         self.seed_subsampling = seed_subsampling
         self.seed_candidates = seed_candidates
-        self.window_width = window_width
-        self.window_min_size = window_min_size
-        self.window_jump = window_jump
-        self.window_penalty = window_penalty
-        self.minperiod = minperiod
-        self.height_threshold = height_threshold
-        self.use_unfinished = use_unfinished
         self.intermediate_saving = intermediate_saving
         self.resume_from_seed = resume_from_seed
         self.stop_at_seed = stop_at_seed
         self.write_nr_seeds = write_nr_seeds
         self._seed_method = method
         self.method = method
+
+        # Common filtering parameters
+        self.height_threshold = height_threshold
+
+        # Parameters for volume_cpd
+        self.window_width = window_width
+        self.window_min_size = window_min_size
+        self.window_jump = window_jump
+        self.window_penalty = window_penalty
+        self.minperiod = minperiod
+        self.use_unfinished = use_unfinished
+
+        # Parameters for linear_dtr
         self.max_change_period = max_change_period
         self.data_gap = data_gap
 
@@ -1104,7 +1134,8 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         # Iterate over all time series to analyse their change points
         for i in seed_candidates_curr:
             # Extract the time series and interpolate its nan values
-            timeseries = self.analysis.distances_for_compute[i, :]
+            # Make a copy of distances to ensure that no overwriting can occur through the timeseries variable
+            timeseries = self.analysis.distances_for_compute[i, :].copy()
             bad_indices = np.isnan(timeseries)
             num_nans = np.count_nonzero(bad_indices)
 
@@ -1387,13 +1418,10 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         method = self.method
         self._seed_method = method
 
-        # These are some arguments used below that we might consider
+        # These are arguments used below that we might consider
         # exposing to the user in the future. For now, they are considered
         # internal, but they are still defined here for readability.
         window_costmodel = "l1"
-        # window_min_size = 12
-        # window_jump = 1
-        # window_penalty = 1.0
 
         # The list of core point indices to check as seeds
         if self.seed_candidates is None:
@@ -1472,7 +1500,7 @@ class RegionGrowingSeed:
 
 
 class ObjectByChange:
-    """Representation a change object in the spatiotemporal domain"""
+    """Representation of a change object in the spatiotemporal domain"""
 
     def __init__(self, data, seed, analysis=None):
         self._data = data
