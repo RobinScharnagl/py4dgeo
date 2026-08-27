@@ -856,12 +856,8 @@ class RegionGrowingAlgorithmBase:
                 f.write(str(len(seeds)))
 
         # Iterate over the seeds to maybe turn them into objects
-        for i, seed in enumerate(
-            seeds
-        ):
-            if i < (
-                self.resume_from_seed
-            ):
+        for i, seed in enumerate(seeds):
+            if i < (self.resume_from_seed):
                 continue
             if self.stop_at_seed is not None and i >= self.stop_at_seed:
                 break
@@ -1101,6 +1097,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         # Magnitude sorting function (descending order)
         # only used for linear seed detection methods
         if self._seed_method in ("linear_rdp", "linear_dtr"):
+
             def magnitude_sort(seed):
                 magn = abs(
                     self.analysis.distances_for_compute[seed.index, seed.start_epoch]
@@ -1253,7 +1250,9 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         lod = self.analysis.uncertainties["lodetection"]
         epsilon = np.nanmean(lod)
 
-        time_day = np.array([td.total_seconds() for td in self.analysis.timedeltas]) / (3600 * 24)
+        time_day = np.array([td.total_seconds() for td in self.analysis.timedeltas]) / (
+            3600 * 24
+        )
 
         # iterate over all time series to identify linear changes
         logger.info("Iterating over seedpoints (RDP)")
@@ -1432,7 +1431,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
         # The list of core point indices to check as seeds
         if self.seed_candidates is None:
-            if self.seed_subsampling <1:
+            if self.seed_subsampling < 1:
                 raise Py4DGeoError(
                     "Subsampling factor must be a positive integer greater than or equal to 1."
                 )
