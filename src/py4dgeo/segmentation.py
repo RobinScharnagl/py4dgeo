@@ -1078,9 +1078,28 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
     # sort the seeds according to their change amplitude in descending order
     def seed_sorting_scorefunction(self):
-        """Return a seed sort key: amplitude for rdp/dtr, else neighborhood similarity"""
+        """Return a sorting key function for prioritizing seed candidates.
 
+        For the default ``volume_cpd`` method, seeds are prioritized by the
+        average similarity of their time series to neighboring core points
+        within ``neighborhood_radius``. Seeds with more similar neighborhoods
+        are processed first. This corresponds to the original 4D-OBC concept.
 
+        For the ``linear_rdp`` and ``linear_dtr`` seed detection methods,
+        seeds are prioritized by the absolute change magnitude between the
+        start and end epoch of the detected seed interval. Larger magnitudes
+        are processed first.
+
+        Returns
+        -------
+        callable
+        A function accepting a ``RegionGrowingSeed`` and returning a
+        numerical sorting score. Lower scores correspond to higher
+        priority during seed processing.
+        """
+
+        # Magnitude sorting function (descending order)
+        # only used for linear seed detection methods
         if self._seed_method in ("linear_rdp", "linear_dtr"):
             def magnitude_sort(seed):
                 magn = abs(
@@ -1092,7 +1111,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             return magnitude_sort
 
         # Neighborhood similarity sorting function
-        # The 4D-OBC algorithm sorts by similarity in the neighborhood of the seed.
+        # default, used for volume seed detection (according to original 4D-OBC method)
         def neighborhood_similarity(seed):
             self.analysis.corepoints._validate_search_tree()
             neighbors = self.analysis.corepoints._radius_search(
