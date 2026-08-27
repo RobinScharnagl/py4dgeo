@@ -1,5 +1,4 @@
 # %%
-from nbclient.client import timestamp
 from py4dgeo.epoch import Epoch, as_epoch
 from py4dgeo.logger import logger_context
 from py4dgeo.util import Py4DGeoError, find_file
@@ -9,20 +8,16 @@ import datetime
 import json
 import logging
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pickle
 import seaborn
 import tempfile
 import zipfile
-import matplotlib.pyplot as plt
 import copy
-import rdp
-from sklearn.linear_model import LinearRegression
 
 import _py4dgeo
-from sklearn.tree import DecisionTreeRegressor
-from functools import reduce
 
 # Get the py4dgeo logger instance
 logger = logging.getLogger("py4dgeo")
@@ -538,13 +533,24 @@ class SpatiotemporalAnalysis:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 zf.extract("objects.pickle", path=tmp_dir)
                 with open(os.path.join(tmp_dir, "objects.pickle"), "rb") as f:
-                    return pickle.load(f)
+                    objects = pickle.load(f)
+
+        # Re-attach analysis backlink after unpickling
+        if objects is not None:
+            for obj in objects:
+                if hasattr(obj, "_analysis"):
+                    obj.attach_analysis(self)
+
+        return objects
 
     @objects.setter
     def objects(self, _objects):
+        if _objects is None:
+            return
+
         # Assert that we received the correct type
-        for seed in _objects:
-            if not isinstance(seed, ObjectByChange):
+        for obj in _objects:
+            if not isinstance(obj, ObjectByChange):
                 raise Py4DGeoError(
                     "Objects are expected to inherit from ObjectByChange"
                 )
@@ -607,6 +613,9 @@ class SpatiotemporalAnalysis:
         smoothing=False,
         smoothing_window=5,
     ):
+
+        from functools import reduce
+
         distance = self.distances_for_compute
         if distance is None:
             raise ValueError
@@ -791,7 +800,6 @@ class RegionGrowingAlgorithmBase:
         return self._analysis
 
     def run(self, analysis, force=False):
-        _py4dgeo.Epoch.set_default_radius_search_tree("octree")
         """Calculate the _segmentation
 
         :param analysis:
@@ -810,11 +818,6 @@ class RegionGrowingAlgorithmBase:
             analysis.invalidate_results()
 
         # Return pre-calculated objects if they are available
-        precalculated = analysis.objects
-        if precalculated is not None:
-            logger.info("Reusing objects by change stored in analysis object")
-            return precalculated
-
         # Check if there are pre-calculated objects.
         # If so, create objects list from these and continue growing objects, taking into consideration objects that are already grown.
         # if not initiate new empty objects list
@@ -855,13 +858,12 @@ class RegionGrowingAlgorithmBase:
         # Iterate over the seeds to maybe turn them into objects
         for i, seed in enumerate(
             seeds
-        ):  # [self.resume_from_seed-1:]): # starting seed ranked at the `resume_from_seed` variable (representing 1 for index 0)
-            # or to keep within the same index range when resuming from seed:
+        ):
             if i < (
-                self.resume_from_seed - 1
-            ):  # resume from index 0 when `resume_from_seed` == 1
+                self.resume_from_seed
+            ):
                 continue
-            if i >= (self.stop_at_seed - 1):  # stop at index 0 when `stop_at_seed` == 1
+            if self.stop_at_seed is not None and i >= self.stop_at_seed:
                 break
 
             # save objects to analysis object when at index `intermediate_saving`
@@ -948,7 +950,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         use_unfinished=True,
         intermediate_saving=0,
         resume_from_seed=0,
-        stop_at_seed=np.inf,
+        stop_at_seed=None,
         write_nr_seeds=False,
         method=None,
         max_change_period=200,
@@ -962,90 +964,143 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             of _segmentation seed candidates. This can be used to speed up
             the generation of seeds. The default of 1 does not perform any
             subsampling, a value of, e.g., 10 would only consider every 10th
-            corepoint for adding seeds.
+            corepoint for adding seeds. The value must be >0.
         :type seed_subsampling: int
         :param seed_candidates:
-            A set of indices specifying which core points should be used for seed detection. This can be used to perform _segmentation for selected locations. The default of None does not perform any selection and uses all corepoints. The subsampling parameter is applied additionally.
+            A set of indices specifying which core points should be used for seed detection.
+            This can be used to perform _segmentation for selected locations.
+            The default of None does not perform any selection and uses all corepoints.
         :type seed_candidates: list
-        :param window_width:
-            The width of the sliding temporal window for change point detection. The sliding window
-            moves along the signal and determines the discrepancy between the first and the second
-            half of the window (i.e. subsequent time series segments within the window width). The
-            default value is 24, corresponding to one day in case of hourly data.
-        :type window_width: int
-        :param window_min_size:
-            The minimum temporal distance needed between two seed candidates, for the second one to be considered.
-            The default value is 1, such that all detected seeds candidates are considered.
-        :type window_min_size: int
-        :param window_jump:
-            The interval on which the sliding temporal window moves and checks for seed candidates.
-            The default value is 1, corresponding to a check for every epoch in the time series.
-        :type window_jump: int
-        :param window_penalty:
-            A complexity penalty that determines how strict the change point detection is.
-            A higher penalty results in stricter change point detection (i.e, fewer points are detected), while a low
-            value results in a large amount of detected change points. The default value is 1.0.
-        :type window_penalty: float
-        :param minperiod:
-            The minimum period of a detected change to be considered as seed candidate for subsequent
-            _segmentation. The default is 24, corresponding to one day for hourly data.
-        :type minperiod: int
-        :param height_threshold:
-            The height threshold represents the required magnitude of a detected change to be considered
-            as seed candidate for subsequent _segmentation. The magnitude of a detected change is derived
-            as unsigned difference between magnitude (i.e. distance) at start epoch and peak magnitude.
-            The default is 0.0, in which case all detected changes are used as seed candidates.
-        :type height_threshold: float
-        :param use_unfinished:
-            If False, seed candidates that are not finished by the end of the time series are not considered in further
-            analysis. The default is True, in which case unfinished seed_candidates are regarded as seeds region growing.
-        :type use_unfinished: bool
         :param intermediate_saving:
             Parameter that determines after how many considered seeds, the resulting list of 4D-OBCs is saved to the SpatiotemporalAnalysis object.
             This is to ensure that if the algorithm is terminated unexpectedly not all results are lost. If set to 0 no intermediate saving is done.
         :type intermediate_saving: int
         :param resume_from_seed:
-            Parameter specifying from which seed index the region growing algorithm must resume. If zero all seeds are considered, starting from the highest ranked seed.
+            Parameter specifying from which seed index the region growing algorithm should start/resume.
+            For example, 0 starts with the first seed and 5 starts with the sixth seed.
+            If zero all seeds are considered, starting from the highest ranked seed.
             Default is 0.
         :type resume_from_seed: int
         :param stop_at_seed:
-            Parameter specifying at which seed to stop region growing and terminate the run function.
-            Default is np.inf, meaning all seeds are considered.
+            Parameter specifying at which seed index to stop region growing and terminate the run function (exclusive).
+            For example, stop_at_seed=10 processes seeds with indices 0..9 only.
+            Default is None, meaning all seeds are considered.
         :type stop_at_seed: int
         :param write_nr_seeds:
             If True, after seed detection, a text file is written in the working directory containing the total number of detected seeds.
             This can be used to split up the consecutive 4D-OBC segmentation into different subsets.
             Default is False, meaning no txt file is written.
         :type write_nr_seeds: bool
+        :param method:
+            Seed detection method to use. Supported values are "volume_cpd", "linear_rdp", and "linear_dtr".
+            If None, the default method "volume_cpd" is used.
+        :type method: str | None
+
+        :param height_threshold:
+            The height threshold represents the required magnitude of a detected change to be considered
+            as seed candidate for subsequent _segmentation. The magnitude of a detected change is derived
+            as unsigned difference between magnitude (i.e. distance) at start epoch and peak magnitude.
+            The default is 0.0, in which case all detected changes are used as seed candidates.
+        :type height_threshold: float
+
+        :param window_width:
+            The width of the sliding temporal window for change point detection. The sliding window
+            moves along the signal and determines the discrepancy between the first and the second
+            half of the window (i.e. subsequent time series segments within the window width). Only used by the "volume_cpd" seed detection method.
+            The default value is 24, corresponding to one day in case of hourly data.
+        :type window_width: int
+        :param window_min_size:
+            The minimum temporal distance needed between two change points, for the second one to be considered.
+            This parameter is only used by the "volume_cpd" seed detection method. The default value is 12.
+        :type window_min_size: int
+        :param window_jump:
+            The interval on which the sliding temporal window moves and checks for seed candidates.
+            Only used by the "volume_cpd" seed detection method.
+            The default value is 1, corresponding to a check for every epoch in the time series.
+        :type window_jump: int
+        :param window_penalty:
+            A complexity penalty that determines how strict the change point detection is.
+            A higher penalty results in stricter change point detection (i.e, fewer points are detected), while a low
+            value results in a large amount of detected change points. Only used by the "volume_cpd" seed detection method.
+            The default value is 1.0.
+        :type window_penalty: float
+        :param minperiod:
+            The minimum period of a detected change to be considered as seed candidate for subsequent
+            _segmentation. Only used by the "volume_cpd" seed detection method.
+            The default is 24, corresponding to one day for hourly data.
+        :type minperiod: int
+        :param use_unfinished:
+            If False, seed candidates that are not finished by the end of the time series are not considered in further
+            analysis. Only used by the "volume_cpd" seed detection method.
+            The default is True, in which case unfinished seed_candidates are regarded as seeds region growing.
+        :type use_unfinished: bool
+
+        :param max_change_period:
+            Maximum allowed duration of a detected seed candidate in epochs.
+            Only used by the "linear_rdp" and "linear_dtr" seed detection methods.
+            Seed candidates exceeding this value are discarded.
+        :type max_change_period: int | None
+        :param data_gap:
+            Epoch index representing a known temporal data gap. Seed candidates spanning this gap are discarded.
+            Only used by the "linear_rdp" and "linear_dtr" seed detection methods.
+        :type data_gap: int | None
+
         """
 
         # Initialize base class
         super().__init__(**kwargs)
 
         # Store the given parameters
+        # General seed detection parameters
         self.seed_subsampling = seed_subsampling
         self.seed_candidates = seed_candidates
-        self.window_width = window_width
-        self.window_min_size = window_min_size
-        self.window_jump = window_jump
-        self.window_penalty = window_penalty
-        self.minperiod = minperiod
-        self.height_threshold = height_threshold
-        self.use_unfinished = use_unfinished
         self.intermediate_saving = intermediate_saving
         self.resume_from_seed = resume_from_seed
         self.stop_at_seed = stop_at_seed
         self.write_nr_seeds = write_nr_seeds
         self._seed_method = method
         self.method = method
+
+        # Common filtering parameters
+        self.height_threshold = height_threshold
+
+        # Parameters for volume_cpd
+        self.window_width = window_width
+        self.window_min_size = window_min_size
+        self.window_jump = window_jump
+        self.window_penalty = window_penalty
+        self.minperiod = minperiod
+        self.use_unfinished = use_unfinished
+
+        # Parameters for linear_dtr
         self.max_change_period = max_change_period
         self.data_gap = data_gap
 
     # sort the seeds according to their change amplitude in descending order
     def seed_sorting_scorefunction(self):
-        """Return a seed sort key: amplitude forrdp/dtr, else neighborhood similarity"""
-        if self._seed_method in ("linear_rdp", "linear_dtr"):
+        """Return a sorting key function for prioritizing seed candidates.
 
+        For the default ``volume_cpd`` method, seeds are prioritized by the
+        average similarity of their time series to neighboring core points
+        within ``neighborhood_radius``. Seeds with more similar neighborhoods
+        are processed first. This corresponds to the original 4D-OBC concept.
+
+        For the ``linear_rdp`` and ``linear_dtr`` seed detection methods,
+        seeds are prioritized by the absolute change magnitude between the
+        start and end epoch of the detected seed interval. Larger magnitudes
+        are processed first.
+
+        Returns
+        -------
+        callable
+        A function accepting a ``RegionGrowingSeed`` and returning a
+        numerical sorting score. Lower scores correspond to higher
+        priority during seed processing.
+        """
+
+        # Magnitude sorting function (descending order)
+        # only used for linear seed detection methods
+        if self._seed_method in ("linear_rdp", "linear_dtr"):
             def magnitude_sort(seed):
                 magn = abs(
                     self.analysis.distances_for_compute[seed.index, seed.start_epoch]
@@ -1055,9 +1110,8 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
             return magnitude_sort
 
-        # Neighborhood similarity sorting function"""
-        # The 4D-OBC algorithm sorts by similarity in the neighborhood
-        # of the seed.
+        # Neighborhood similarity sorting function
+        # default, used for volume seed detection (according to original 4D-OBC method)
         def neighborhood_similarity(seed):
             self.analysis.corepoints._validate_search_tree()
             neighbors = self.analysis.corepoints._radius_search(
@@ -1083,12 +1137,21 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
 
         return neighborhood_similarity
 
-    def volume_cpd(self, seed_candidates_curr):
+    def detect_volume_cpd(self, seed_candidates_curr):
+
+        # Before starting the process, we check if the user has set a reasonable window width parameter
+        if self.window_width >= self.analysis.distances_for_compute.shape[1]:
+            raise Py4DGeoError(
+                "Window width cannot be larger than the length of the time series - please adapt parameter"
+            )
+
         seeds = []
+
         # Iterate over all time series to analyse their change points
         for i in seed_candidates_curr:
             # Extract the time series and interpolate its nan values
-            timeseries = self.analysis.distances_for_compute[i, :]
+            # Make a copy of distances to ensure that no overwriting can occur through the timeseries variable
+            timeseries = self.analysis.distances_for_compute[i, :].copy()
             bad_indices = np.isnan(timeseries)
             num_nans = np.count_nonzero(bad_indices)
 
@@ -1178,25 +1241,24 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
     def detect_linear_rdp(
         self, seed_candidates_curr, max_change_period=None, data_gap=None
     ):
+        try:
+            import rdp
+            from sklearn.linear_model import LinearRegression
+        except ImportError as exc:
+            raise Py4DGeoError(
+                "The 'linear_rdp' seed detection method requires the optional seed detection dependencies."
+            ) from exc
+
         seeds = []
         lod = self.analysis.uncertainties["lodetection"]
         epsilon = np.nanmean(lod)
+
+        time_day = np.array([td.total_seconds() for td in self.analysis.timedeltas]) / (3600 * 24)
 
         # iterate over all time series to identify linear changes
         logger.info("Iterating over seedpoints (RDP)")
         for cp_idx in seed_candidates_curr:
             timeseries = self.analysis.distances_for_compute[cp_idx, :]
-            timestamps = [
-                t + self.analysis.reference_epoch.timestamp
-                for t in self.analysis.timedeltas
-            ]
-            time_day = np.array(
-                [
-                    (t - self.analysis.reference_epoch.timestamp).total_seconds()
-                    / (3600 * 24)
-                    for t in timestamps
-                ]
-            )
 
             # polygon approximation using the Ramer-Douglas-Peucker algorithm
             poly_aprx = rdp.rdp(
@@ -1262,6 +1324,14 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
     def detect_linear_dtr(
         self, seed_candidates_curr, max_change_period=None, data_gap=None
     ):
+        try:
+            from sklearn.linear_model import LinearRegression
+            from sklearn.tree import DecisionTreeRegressor
+        except ImportError as exc:
+            raise Py4DGeoError(
+                "The 'linear_dtr' seed detection method requires the optional seed detection dependencies."
+            ) from exc
+
         seeds = []
 
         # iterate over all time series to identify linear changes
@@ -1355,41 +1425,32 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
         method = self.method
         self._seed_method = method
 
-        # These are some arguments used below that we might consider
+        # These are arguments used below that we might consider
         # exposing to the user in the future. For now, they are considered
         # internal, but they are still defined here for readability.
         window_costmodel = "l1"
-        # window_min_size = 12
-        # window_jump = 1
-        # window_penalty = 1.0
-
-        AVAILABLE_METHODS = {"volume_cpd", "linear_dtr", "linear_rdp"}
-
-        if method is not None and method not in AVAILABLE_METHODS:
-            raise ValueError(f"Unknown seed decetcion method:{method}")
-
-        # Before starting the process, we check if the user has set a reasonable window width parameter
-        if self.window_width >= self.analysis.distances_for_compute.shape[1]:
-            raise Py4DGeoError(
-                "Window width cannot be larger than the length of the time series - please adapt parameter"
-            )
 
         # The list of core point indices to check as seeds
         if self.seed_candidates is None:
-            if self.seed_subsampling == 0:
+            if self.seed_subsampling <1:
                 raise Py4DGeoError(
-                    "Subsampling factor cannot be 0, use 1 or any integer larger than 1"
+                    "Subsampling factor must be a positive integer greater than or equal to 1."
                 )
             # Use all corepoints if no selection specified, considering subsampling
             seed_candidates_curr = range(
                 0, self.analysis.distances_for_compute.shape[0], self.seed_subsampling
             )
         else:
-            # Use the specified corepoint indices, but consider subsampling
-            seed_candidates_curr = self.seed_candidates  # [::self.seed_subsampling]
+            # Use the specified corepoint indices, do not consider subsampling
+            seed_candidates_curr = self.seed_candidates
 
-        if method is None or method == "volume_cpd":
-            seeds = self.volume_cpd(seed_candidates_curr)
+        # if method is not specified, use the default
+        if method is None:
+            method = "volume_cpd"
+            logger.info("Using default seed detection method: volume_cpd")
+
+        if method == "volume_cpd":
+            seeds = self.detect_volume_cpd(seed_candidates_curr)
 
         elif method == "linear_dtr":
             seeds = self.detect_linear_dtr(
@@ -1406,7 +1467,7 @@ class RegionGrowingAlgorithm(RegionGrowingAlgorithmBase):
             )
 
         else:
-            raise ValueError("Something went wrong")
+            raise ValueError(f"Unknown seed decection method:{method}")
 
         return seeds
 
@@ -1446,7 +1507,7 @@ class RegionGrowingSeed:
 
 
 class ObjectByChange:
-    """Representation a change object in the spatiotemporal domain"""
+    """Representation of a change object in the spatiotemporal domain"""
 
     def __init__(self, data, seed, analysis=None):
         self._data = data
@@ -1475,6 +1536,34 @@ class ObjectByChange:
     def threshold(self):
         """The distance threshold that produced this object"""
         return self._data.threshold
+
+    def attach_analysis(self, analysis):
+        self._analysis = analysis
+
+    def __getstate__(self):
+        """
+        Return the pickle state for this object.
+
+        We explicitly omit `_analysis` because it can contain a back-link to the
+        SpatiotemporalAnalysis object, which would cause the full analysis to be
+        pickled into every ObjectByChange instance.
+        """
+        return {
+            "_data": self._data,
+            "seed": self.seed,
+            # intentionally NOT storing "_analysis"
+        }
+
+    def __setstate__(self, state):
+        """
+        Restore the object from pickle state.
+
+        `_analysis` is always reset to None. It can later be re-attached by the
+        algorithm / analysis code if needed.
+        """
+        self._data = state["_data"]
+        self.seed = state["seed"]
+        self._analysis = None
 
     def plot(self, filename=None):
         """Create an informative visualization of the Object By Change
